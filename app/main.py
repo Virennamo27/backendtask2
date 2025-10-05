@@ -1,27 +1,31 @@
 # app/main.py
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
-from motor.motor_asyncio import AsyncIOMotorClient
-from pydantic import BaseModel, EmailStr
-from app.auth import get_password_hash, verify_password, create_access_token
 from jose import jwt, JWTError
+from pydantic import BaseModel, EmailStr
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 import os
-from datetime import datetime, timedelta
+
+from app.auth import get_password_hash, verify_password, create_access_token
+from app.db import db  # ✅ Use shared DB connection
+from app.routers import tickets  # ✅ Tickets router
 
 # -------------------------
-# Load env and MongoDB
+# Initialize FastAPI App
 # -------------------------
-load_dotenv()
-MONGODB_URI = os.getenv("MONGODB_URI")
+app = FastAPI(title="Ticketing System API")
 
-client = AsyncIOMotorClient(MONGODB_URI)
-db = client["helpdesk"]
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+# Include Router
+app.include_router(tickets.router)
 
 # -------------------------
-# Pydantic models
+# OAuth2 Configuration
+# -------------------------
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+
+# -------------------------
+# Pydantic Models
 # -------------------------
 class UserCreate(BaseModel):
     name: str
@@ -29,11 +33,8 @@ class UserCreate(BaseModel):
     password: str
 
 # -------------------------
-# FastAPI app
+# Signup Route
 # -------------------------
-app = FastAPI(title="Mini Helpdesk API")
-
-# Signup route
 @app.post("/auth/signup", status_code=201)
 async def signup(user: UserCreate):
     existing_user = await db["users"].find_one({"email": user.email})
@@ -42,10 +43,14 @@ async def signup(user: UserCreate):
 
     user_dict = user.dict()
     user_dict["password"] = get_password_hash(user_dict["password"])
-    result = await db["users"].insert_one(user_dict)
-    return {"id": str(result.inserted_id)}
+    user_dict["created_at"] = datetime.utcnow()
 
-# Login route
+    result = await db["users"].insert_one(user_dict)
+    return {"id": str(result.inserted_id), "email": user.email}
+
+# -------------------------
+# Login Route
+# -------------------------
 @app.post("/auth/login")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = await db["users"].find_one({"email": form_data.username})
@@ -55,7 +60,9 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     access_token = create_access_token({"sub": user["email"]})
     return {"access_token": access_token, "token_type": "bearer"}
 
-# Protected route
+# -------------------------
+# Auth Dependency
+# -------------------------
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     from app.auth import SECRET_KEY, ALGORITHM
     try:
@@ -63,20 +70,26 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         email = payload.get("sub")
         if email is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+
         user = await db["users"].find_one({"email": email})
         if user is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+
         user["_id"] = str(user["_id"])
         return user
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-# Example protected route
+# -------------------------
+# Protected Route (Example)
+# -------------------------
 @app.get("/users/me")
 async def read_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
-# Public route
+# -------------------------
+# Public Route (List Users)
+# -------------------------
 @app.get("/users")
 async def get_users():
     users = []
