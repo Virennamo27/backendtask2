@@ -1,22 +1,31 @@
 # app/main.py
+print("✅ main.py loaded")  # Debug: confirm this file is running
+
 from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.security import OAuth2PasswordRequestForm, OAuth2PasswordBearer
 from jose import jwt, JWTError
 from pydantic import BaseModel, EmailStr
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
-import os
-
+from app import auth
 from app.auth import get_password_hash, verify_password, create_access_token
-from app.db import db  # ✅ Use shared DB connection
-from app.routers import tickets  # ✅ Tickets router
+from app.db import db
+from app.routers import tickets  # Tickets router
 
 # -------------------------
 # Initialize FastAPI App
 # -------------------------
 app = FastAPI(title="Ticketing System API")
 
-# Include Router
+# -------------------------
+# Root Route
+# -------------------------
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to the Ticketing System API!"}
+
+# -------------------------
+# Include Routers
+# -------------------------
 app.include_router(tickets.router)
 
 # -------------------------
@@ -81,14 +90,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 # -------------------------
-# Protected Route (Example)
+# Protected Route Example
 # -------------------------
 @app.get("/users/me")
 async def read_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
 # -------------------------
-# Public Route (List Users)
+# Public Route Example
 # -------------------------
 @app.get("/users")
 async def get_users():
